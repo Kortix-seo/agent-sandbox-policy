@@ -1,0 +1,96 @@
+# yaml-language-server: $schema=https://kortix.com/schema/kortix.v2.schema.json
+#
+# Reference manifest for a sandboxed agent that proposes work and never lands it.
+#
+# Everything a session may reach is written here and reviewed as a diff. v2 is
+# deny-by-default: an omitted connectors/secrets/kortix_permissions/skills grant
+# resolves to "none". That is the whole point of this file — the grants below are
+# short because the agent is meant to have little, not because the list was cut.
+#
+# Validate before you push:  kortix validate --file kortix.yaml
+kortix_version: 2
+
+# The agent a session boots when it names none. It is declared below.
+default_agent: sandbox-editor
+
+project:
+  name: agent-sandbox-policy
+  description: A sandboxed agent that edits its session branch and opens a change request for a person to merge.
+
+# No project-wide secrets are required. A secret listed here but not grantable to
+# an agent is still a value the sandbox would receive; keep the list empty unless
+# a granted agent needs one.
+env:
+  required: []
+  optional: []
+
+tools:
+  read: kortix:read
+  write: kortix:write
+  edit: kortix:edit
+  bash: kortix:bash
+  memory: kortix:memory
+  web_search: kortix:web_search
+  scrape_webpage: kortix:scrape_webpage
+  show: kortix:show
+
+agents:
+  sandbox-editor:
+    file: agents/sandbox-editor.md
+    enabled: true
+    # Its own checkout of the project repository on the session branch, so every
+    # edit is a commit a reviewer can diff. Set false for an agent with no
+    # business reading the codebase at all.
+    workspace:
+      project_repository: true
+    # No connectors: nothing to call outside the repository. Add one slug at a
+    # time and give it a policy below.
+    connectors: none
+    # No secrets. A runtime secret is a real environment value in the sandbox;
+    # only connector credentials are brokered server-side and never enter it.
+    secrets: none
+    skills: none
+    # Enough to read the repo, commit to the session branch and open a change
+    # request. Deliberately NOT project.gitops.merge: the merge stays a person's.
+    kortix_permissions:
+      - project.read
+      - project.file.read
+      - project.gitops.read
+      - project.gitops.push
+
+  # A second agent with fewer powers, to show that the grant list is per agent
+  # and not a project setting. It can read and propose a review, not push.
+  policy-reviewer:
+    file: agents/policy-reviewer.md
+    enabled: true
+    workspace:
+      project_repository: true
+    connectors: none
+    secrets: none
+    skills: none
+    kortix_permissions:
+      - project.read
+      - project.file.read
+      - project.gitops.read
+      - project.review.submit
+
+# The default for a connector call that no rule below matches. `risk` means a
+# read runs and a write or destructive call needs approval; `allow_all` (the
+# platform default) means the call just runs.
+policy:
+  default_mode: risk
+
+# Project-wide rules, matched against <connector-slug>.<tool> with * globs and
+# checked before the connector's own policies. The first matching rule wins.
+# Keep at least one block rule for the calls a reviewer would never approve
+# twice in a row.
+policies:
+  - match: "*.*.delete*"
+    action: block
+  - match: "*.send_email"
+    action: require_approval
+
+# How long a held call waits for a decision before it expires. Kortix clamps this
+# to 5 minutes through 30 days; anything else falls back to 24 hours.
+approvals:
+  ttl: 4h
